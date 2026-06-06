@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: epn-filesystem
+  namespace: epn-system
+  labels:
+    app: epn-filesystem
+    epn.io/operator: epn.filesystem.v1
+spec:
+  selector:
+    app: epn-filesystem
+  ports:
+    - name: grpc
+      port: 50600
+      targetPort: 50600
+      protocol: TCP
+  type: ClusterIP

@@ -1,0 +1,28 @@
+id: epn.filesystem.v1
+version: "1.0.0"
+display_name: "EPN FileSystem"
+description: "Persistent volume operator. Provides a managed local filesystem pod accessible to other deployments."
+category: storage
+
+resource_requests:
+  cpu: "100m"
+  memory: "128Mi"
+  storage: "10Gi"
+  gpu: none
+
+persona_ref: "epn-personas/personas/sigma/v1"
+
+bridge_capabilities:
+  - name: filesystem.volume.list
+    description: "List managed volumes and their usage"
+  - name: filesystem.volume.create
+    description: "Create a new named volume"
+  - name: filesystem.volume.delete
+    description: "Delete a volume"
+  - name: filesystem.volume.stat
+    description: "Get size and last-modified of a volume"
+
+tags:
+  - storage
+  - local
+  - free-tier
