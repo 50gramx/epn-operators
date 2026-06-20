@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epn-memory-pool
+  namespace: epn-system
+  labels:
+    app: epn-memory-pool
+    epn.io/operator: epn.memory.v1
+    epn.io/ram-pool: local
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: epn-memory-pool
+  template:
+    metadata:
+      labels:
+        app: epn-memory-pool
+        epn.io/ram-pool: local
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "--maxmemory-policy", "allkeys-lru"]
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "50m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"

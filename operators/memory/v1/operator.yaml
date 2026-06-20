@@ -1,0 +1,27 @@
+id: epn.memory.v1
+version: "1.0.0"
+display_name: "EPN Memory Pool"
+description: "Shared in-memory pool (Redis) for RAM-heavy workloads such as LLM KV-caches or in-memory databases. Advertised to the federated scheduler as epn.io/ram-pool capacity."
+category: memory
+
+resource_requests:
+  cpu: "50m"
+  memory: "256Mi"
+  gpu: none
+
+resource_label: epn.io/ram-pool
+resource_label_values:
+  - local
+  - nearmesh
+  - farmesh
+
+persona_ref: "epn-personas/personas/mu/v1"
+
+bridge_capabilities:
+  - name: memory.pool.stat
+    description: "Get current memory-pool occupancy and bandwidth class"
+
+tags:
+  - memory
+  - local
+  - free-tier
