@@ -1,0 +1,49 @@
+{
+  "operator_id": "epn.diag.v1",
+  "version": "1",
+  "body": "script",
+  "reads_cluster": true,
+  "deployment": "epn-diag",
+  "service": "epn-diag",
+  "persona": {
+    "ID": "epn.diag.v1",
+    "DisplayName": "Diag",
+    "Role": "I read this gram's cluster and say why something is not running: which node advertises a GPU, what the device plugin is doing, which engine pod is not ready and what the scheduler said, what the quota holds.",
+    "Domain": "cluster diagnosis: GPU scheduling, engine readiness, warning events, resource quota"
+  },
+  "capabilities": [
+    {
+      "Name": "diag.health",
+      "Description": "Liveness check for the diagnostic reader itself.",
+      "Mode": "read_only",
+      "endpoint": { "method": "GET", "port": 8080, "path": "/diag/health" }
+    },
+    {
+      "Name": "diag.gpu",
+      "Description": "Every node's allocatable and capacity GPU resources, plus the vendor device plugin DaemonSet: desired, ready, and per-pod scheduling message, waiting reason, last termination and restarts. Answers why the cluster advertises no GPU.",
+      "Mode": "read_only",
+      "endpoint": { "method": "GET", "port": 8080, "path": "/diag/gpu" }
+    },
+    {
+      "Name": "diag.engines",
+      "Description": "Every engine deployment in epn-system: replicas, ready, available, images, GPU limits, and for anything not ready the pod-level scheduling message and waiting reason.",
+      "Mode": "read_only",
+      "endpoint": { "method": "GET", "port": 8080, "path": "/diag/engines" }
+    },
+    {
+      "Name": "diag.events",
+      "Description": "The newest Warning events across the cluster, or within one namespace. The scheduler and kubelet write the reason for most failures here.",
+      "Mode": "read_only",
+      "inputs": [
+        { "name": "namespace", "type": "string", "description": "Restrict to one namespace; empty for all.", "required": false }
+      ],
+      "endpoint": { "method": "GET", "port": 8080, "path": "/diag/events" }
+    },
+    {
+      "Name": "diag.quota",
+      "Description": "Every ResourceQuota visible: hard versus used, and the pods that declare no requests and so count as zero against a cap.",
+      "Mode": "read_only",
+      "endpoint": { "method": "GET", "port": 8080, "path": "/diag/quota" }
+    }
+  ]
+}
