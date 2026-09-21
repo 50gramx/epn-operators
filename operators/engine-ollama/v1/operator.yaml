@@ -4,3 +4,4 @@ display_name: "Ollama inference engine"
 description: "Ollama inference pod: llama.cpp model management, Ollama tag and HuggingFace GGUF resolution, /api/chat protocol with native tool-calling support. Served at a configurable node port, model cache persisted to a PVC or RAM-backed emptyDir."
 kind: engine
 priority_class: epn-interactive
+substrate: pod

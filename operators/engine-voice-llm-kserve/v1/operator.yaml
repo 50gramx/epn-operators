@@ -4,3 +4,4 @@ display_name: "Voice talker as a KServe InferenceService"
 description: "The spoken-turn engine served through KServe on Knative (D69): scale-to-zero at rest, woken by the first request of a call, the model preloaded before the pod reports ready so the first turn never pays the load. epn-live priority: a person is on the line."
 kind: engine
 priority_class: epn-live
+substrate: pod

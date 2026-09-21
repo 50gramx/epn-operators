@@ -4,3 +4,4 @@ display_name: "Voice LLM engine"
 description: "Spoken-turn inference engine distinct from the general engine. Zero at rest, woken with the speech engines for the length of a call. The voice pod's LLM runs the one model, scaled to zero between calls, and hibernates with the voice pack."
 kind: engine
 priority_class: epn-live
+substrate: pod
