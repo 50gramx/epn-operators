@@ -21,6 +21,13 @@ spec:
         patchStrategicMerge:
           spec:
             +(priorityClassName): {{ .DefaultPriorityClass }}
+            # The in-tree Priority plugin has already stamped priority: 0 by
+            # the time this mutation runs; left in place, the API server
+            # refuses the pod ("the integer value of priority (0) must not be
+            # provided", 2026-09-21). Cleared, so the plugin recomputes it
+            # from the class this rule names.
+            priority: null
+            preemptionPolicy: null
 ---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
