@@ -1,0 +1,6 @@
+id: engine-speech
+version: "1"
+display_name: "Speech engine"
+description: "Speech-to-text and text-to-speech engines for voice dial. Renders namespace, shared model claim, Deployment and Service for one speech engine role (asr or tts). Speech weights live in the one shared model store (SharedModelPVC, epn-models) with llama.cpp and vLLM."
+kind: engine
+priority_class: epn-live

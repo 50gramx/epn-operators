@@ -1,0 +1,149 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .DeploymentName }}
+  namespace: {{ .Namespace }}
+  labels:
+    app: {{ .DeploymentName }}
+    epn.io/component: generation
+spec:
+  # ZERO AT REST (D32). The voice pack's discipline: nothing runs until a
+  # job wakes it (GenerationEngineOperator.Wake), it hibernates after an
+  # idle window, and a voice call takes it down outright. It was one replica
+  # forever, with every probe-loaded diffusion model resident until the next
+  # OOM kill.
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ .DeploymentName }}
+  template:
+    metadata:
+      annotations:
+        # -- THE ENGINE'S SOURCE IS A ConfigMap, AND A ConfigMap DOES NOT
+        # RESTART ANYTHING.
+        #
+        # server.py ships as configuration, is re-applied on every SpinUp, and
+        # the running pod goes on executing whatever it started with. So every
+        # change to this engine landed in the repo, reached the cluster, and
+        # never reached the process:
+        #
+        #   /v1/usage returned 404 while /v1/models returned 200, on a gram
+        #   running the build that added it;
+        #   purge_stale_partials over the whole cache never ran;
+        #   and the MPS/CUDA device layer -- the change that stopped this
+        #   engine computing on the CPU while reporting an accelerator --
+        #   was never once executed by the engine it was written for.
+        #
+        # A checksum of the source in the pod template is what makes the
+        # Deployment roll when the source changes, and stay still when it does
+        # not. Without it "deployed" and "running" are different builds and
+        # nothing says so.
+        epn.io/source-checksum: "{{ .SourceChecksum }}"
+      labels:
+        app: {{ .DeploymentName }}
+        epn.io/component: generation
+    spec:
+      # Nobody is waiting on a bake or an image probe; never preempts, first to yield.
+      priorityClassName: epn-background
+      containers:
+        - name: engine
+          image: {{ .Image }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export PIP_ROOT_USER_ACTION=ignore
+              if [ ! -f {{ .BaseMarker }} ]; then
+                mkdir -p /cache/deps
+                {{ .BaseInstall }}
+                touch {{ .BaseMarker }}
+              fi
+              # Speech and speaker packages, gated on their own marker so a
+              # pod whose base deps are already in place still gets them:
+              # installing on the first request timed out the first probe.
+              # THE MARKER IS DERIVED FROM THIS COMMAND (see depMarker), so a
+              # changed pin invalidates it on every pod by itself. It used to be
+              # hand-versioned, and the bump below records why that mattered:
+              # the first form installed an unpinned
+              # torchaudio, which dragged a newer torch into /cache/deps; with
+              # PYTHONPATH=/cache/deps that torch shadowed the image's and the
+              # engine died at import on every gram that ran it (the GPU gram
+              # sat at 0/1 ready for hours). A pod that touched the old marker
+              # still carries the shadow, so: remove any torch under
+              # /cache/deps, install the matching torchaudio without deps. The
+              # two dead hand-written markers are removed here too, so a pod
+              # carrying either does not keep them forever.
+              if [ ! -f {{ .SpeechMarker }} ]; then
+                rm -rf /cache/deps/torch /cache/deps/torch-* /cache/deps/torchaudio /cache/deps/torchaudio-* /cache/deps/.speech.ok /cache/deps/.speech.v2.ok
+                {{ .SpeechInstall }}                   && touch {{ .SpeechMarker }} || true
+              fi
+              # WeSpeaker speaker-id encoders (config.yaml + avg_model.pt/.onnx),
+              # on their own marker for the same reason speechbrain has one: a
+              # pod whose other deps are already cached still needs this one.
+              if [ ! -f {{ .WespeakerMarker }} ]; then
+                {{ .WespeakerInstall }} && touch {{ .WespeakerMarker }} || true
+              fi
+              # Moshi (Kyutai full-duplex speech): moshi.models.loaders is the
+              # Mimi codec + LM loader the speech-duplex runtime needs. --no-deps,
+              # same reason as torchaudio above: moshi's own requirements pin a
+              # torch range that does not match the one already on /cache/deps,
+              # and an unpinned second resolve is exactly the shadow-torch bug
+              # documented on .speech.v2.ok. sphn and sentencepiece are moshi's
+              # real runtime deps (Mimi's Rust-backed resampler, the LM's
+              # tokenizer) and carry no torch of their own, so they install plain.
+              if [ ! -f {{ .DuplexMarker }} ]; then
+                {{ .DuplexInstall }}                   && touch {{ .DuplexMarker }} || true
+              fi
+              export PYTHONPATH=/cache/deps
+              exec python -u /app/server.py
+          env:
+            - name: EPN_MODELS_DIR
+              value: /cache/models
+            - name: EPN_PORT
+              value: "{{ .Port }}"
+            - name: EPN_THREADS
+              value: "{{ .CPUThreads }}"
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+            # A gram whose owner signed a PlatformDelegation for "huggingface"
+            # has this perimeter Secret (see CredentialMaterialiser, WritePlatformSecret);
+            # absent, the pod has no token and gated repos are named as such
+            # (see install()). Optional so the pod starts either way.
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .HuggingFaceSecretName }}
+                  key: {{ .PlatformSecretKey }}
+                  optional: true
+          ports:
+            - containerPort: {{ .Port }}
+          volumeMounts:
+            - name: src
+              mountPath: /app
+            - name: cache
+              mountPath: /cache
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: {{ .Port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 60
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "{{ .MemLimitMiB }}Mi"
+              cpu: "{{ .CPUMillicores }}m"{{ .GPULimit }}
+      volumes:
+        - name: src
+          configMap:
+            name: {{ .DeploymentName }}-src
+        - name: cache
+          persistentVolumeClaim:
+            claimName: {{ .DeploymentName }}-cache

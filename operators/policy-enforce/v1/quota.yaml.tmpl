@@ -1,0 +1,14 @@
+{{- if .Quota }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: epn-budget
+  namespace: {{ .Quota.Namespace }}
+  labels:
+    epn.io/component: policy
+spec:
+  hard:
+    limits.memory: "{{ .Quota.MemoryMiB }}Mi"
+    limits.cpu: "{{ .Quota.CPUMillicores }}m"
+    pods: "{{ .Quota.Pods }}"
+{{- end }}

@@ -1,0 +1,13 @@
+{{- range .Classes }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ .Name }}
+  labels:
+    epn.io/component: priority
+value: {{ .Value }}
+globalDefault: false
+preemptionPolicy: {{ if .Preempts }}PreemptLowerPriority{{ else }}Never{{ end }}
+description: "{{ .Description }}"
+---
+{{- end }}

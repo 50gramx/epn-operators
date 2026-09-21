@@ -1,0 +1,6 @@
+id: engine-generation
+version: "1"
+display_name: "Image generation engine"
+description: "Image generation pod: OpenAI image API compatible, with support for SAM segmentation, TTS, and full-duplex speech (Moshi). Runs on CPU, CUDA, or Apple Silicon (MLX). Engine source is mounted from ConfigMap, dependencies installed to cache volume on first boot."
+kind: engine
+priority_class: epn-background

@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: {{ .Namespace }}
+  labels:
+    app: ollama
+    epn.io/operator: epn.ollama-pod.v1
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the model cache is a ReadWriteOnce PVC, so a new
+  # pod cannot co-mount it while the old one still holds it. A rolling update
+  # deadlocks (new pod Pending on the volume, old pod never freed) and the apply
+  # times out — exactly what broke the variant-sweep reconfigure. Recreate tears
+  # the old pod down first, then brings the reconfigured one up.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      # A person waiting on a screen; yields to a live call (priority_classes.go).
+      priorityClassName: epn-interactive
+{{ .RuntimeClass }}      containers:
+      - name: ollama
+        image: {{ .OllamaImage }}
+        # IPC_LOCK lets the engine mlock() the model weights into RAM so the
+        # kernel cannot evict them under KV/prompt-cache pressure and re-read all
+        # ~7 GB from disk per token (the 100%-disk decode stall). Without this the
+        # use_mlock option the daemon sends is silently ignored.
+        securityContext:
+          capabilities:
+            add: ["IPC_LOCK"]
+        # Never re-pull an engine we already have; an edge gram cannot afford a
+        # multi-GB fetch on every pod restart.
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: OLLAMA_HOST
+          value: "0.0.0.0:8000"
+        - name: OLLAMA_MODELS
+          value: /models
+        - name: OLLAMA_NUM_PARALLEL
+          value: "{{ .Parallel }}"
+        # Keep weights resident. Re-loading 3 GiB from disk on every idle timeout
+        # is the difference between a 2s reply and a 40s one.
+        - name: OLLAMA_KEEP_ALIVE
+          value: "24h"
+        # ── AND BOUND WHAT "RESIDENT" MEANS ──────────────────────────────
+        #
+        # 24h keep-alive is right for a served model and ruinous for a
+        # measurement campaign: with no ceiling, every model the family pass
+        # measured stayed in memory for a day. This pod was OOM-killed 21
+        # times (exit 137, limit 11517Mi) and the backlog recorded it as
+        # "Phi-4-mini IQ1_S kills the engine" — it was not the quant, it was
+        # six different Phi-4 artifacts each loading beside a ~7 GiB served
+        # model that nothing ever released.
+        #
+        # A COUNT IS A PROXY FOR A SIZE and is set here only as a backstop, so
+        # a bug cannot stack five models. Two 6 GiB models are two models and
+        # still an OOM; the real check reads bytes from /api/ps before each
+        # load (builtin.RoomFor).
+        - name: OLLAMA_MAX_LOADED_MODELS
+          value: "2"
+        - name: EPN_DEFAULT_MODEL
+          value: "{{ .Model }}"{{ .ExtraEnv }}
+{{ .Resources }}        volumeMounts:
+        - name: models
+          mountPath: /models
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 60
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 30
+      volumes:
+{{ .ModelVolume }}

@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+  labels:
+    app: {{ .Name }}
+    epn.io/component: speech
+spec:
+  # RESIDENT. The zero-at-rest rule was written for the speaches engine, which
+  # held ~1.5 GiB resident doing nothing — a real cost to keep warm. The moonshine
+  # engine measured 27 MiB with a model loaded, so the calculus inverts: holding
+  # it warm is cheaper than the old engine's IDLE overhead, and it buys a
+  # cold-start-free call. The idle-gate may still hibernate it under memory
+  # pressure; residency-as-default is honoured here at the manifest, and the
+  # elastic controller (next increment) owns the dynamic policy.
+  replicas: 1
+  # RECREATE, NOT ROLLING UPDATE — on a single-node gram a surge is impossible.
+  #
+  # The default RollingUpdate carries maxSurge 25%, so k8s tries to stand the NEW
+  # pod up before retiring the old one. This node runs at ~97% of allocatable CPU
+  # requests (the general inference engine alone requests 6000m), so the surge pod
+  # has nowhere to go and the rollout deadlocks:
+  #
+  #   FailedScheduling: 0/1 nodes are available: 1 Insufficient cpu
+  #
+  # The old pod keeps serving on the old spec forever and the new spec never takes
+  # effect — which is how a corrected memory limit can be applied, accepted, and
+  # still never reach the container that needed it. Recreate stops the old pod
+  # first. The brief gap costs nothing here: the pack sits at zero replicas
+  # between calls anyway.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ .Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Name }}
+        epn.io/component: speech
+    spec:
+      # LIVE. A person is on the line; the scheduler evicts anything lower
+      # to seat this pod (priority_classes.go).
+      priorityClassName: epn-live
+      # The cache directory must EXIST before the server answers its first
+      # request, or readiness never passes. speaches' /v1/models calls
+      # huggingface_hub.scan_cache_dir(), which RAISES CacheNotFound (HTTP 500)
+      # when the directory is absent — it does not treat "no cache yet" as an
+      # empty list. An emptyDir starts empty by definition, so without this the
+      # probe 500s forever, the rollout never completes, and two ReplicaSets sit
+      # side by side flip-flopping the pod identity the metering sampler reads.
+      initContainers:
+        - name: init-cache
+          image: {{ .Image }}
+          imagePullPolicy: IfNotPresent
+          command: ["mkdir", "-p", "/cache/models"]
+          volumeMounts:
+            - name: model-cache
+              mountPath: /cache
+              subPath: speech
+      containers:
+        - name: {{ .Role }}
+          image: {{ .Image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ .Port }}
+          env:
+            - name: EPN_SPEECH_ROLE
+              value: "{{ .Role }}"
+            - name: EPN_SPEECH_MODEL
+              value: "{{ .Model }}"
+            # The moonshine engine caches its sherpa-onnx archives here (server.py
+            # MODELS_DIR); the models persist on the shared PVC subPath so a rollout
+            # does not re-download them.
+            - name: EPN_MODELS_DIR
+              value: "/cache/models"
+            - name: EPN_PORT
+              value: "{{ .Port }}"
+            - name: EPN_THREADS
+              value: "{{ .SpeechBurstThreads }}"
+          volumeMounts:
+            - name: model-cache
+              mountPath: /cache
+              subPath: speech
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: {{ .Port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: "{{ .SpeechRequestMillicores }}m"
+              # MEMORY REQUEST = LIMIT. The kernel's OOM killer ranks pods by
+              # how far above their request they sit; a 256Mi request under a
+              # 1 GiB residency put the live pack first in line behind a
+              # probe. Memory is reserved at its limit so the pack is the last
+              # thing killed. CPU stays a burst-pool request on purpose: the
+              # three stages of the pipeline are never hot at once.
+              memory: "{{ .MemMiB }}Mi"
+            # LIMITS, not just requests. A request is a scheduling hint; it does
+            # not cap anything. Without these, two compute-bound speech engines
+            # took every core they could alongside the LLM engine and cooked the
+            # machine. The number is budgeted from real host capacity
+            # (SpeechCPUBudget), not chosen here.
+            limits:
+              cpu: "{{ .CPUMillicores }}m"
+              memory: "{{ .MemMiB }}Mi"
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: {{ .SharedModelPVC }}

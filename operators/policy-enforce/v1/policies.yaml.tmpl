@@ -1,0 +1,106 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: epn-default-priority
+  labels:
+    epn.io/component: policy
+  annotations:
+    policies.kyverno.io/description: "A pod that names no priority class is background work: it never outranks a person on a live call by omission."
+spec:
+  background: false
+  rules:
+    - name: default-priority-class
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchLabels:
+                  epn.io/governed: "true"
+      mutate:
+        patchStrategicMerge:
+          spec:
+            +(priorityClassName): {{ .DefaultPriorityClass }}
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: epn-known-priority
+  labels:
+    epn.io/component: policy
+  annotations:
+    policies.kyverno.io/description: "Only the ladder's classes exist here. A pod that names another is refused: it is claiming a rung the network never ranked."
+spec:
+  validationFailureAction: {{ .FailureAction }}
+  background: false
+  rules:
+    - name: priority-class-is-on-the-ladder
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchLabels:
+                  epn.io/governed: "true"
+      validate:
+        message: "priorityClassName must be one of the EP&N ladder: {{ range $i, $c := .Classes }}{{ if $i }}, {{ end }}{{ $c }}{{ end }}"
+        deny:
+          conditions:
+            all:
+              - key: "{{ "{{" }} request.object.spec.priorityClassName || '' {{ "}}" }}"
+                operator: AnyNotIn
+                value: [{{ range $i, $c := .Classes }}{{ if $i }}, {{ end }}"{{ $c }}"{{ end }}, ""]
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: epn-memory-limit-required
+  labels:
+    epn.io/component: policy
+  annotations:
+    policies.kyverno.io/description: "Limits are economic, not magic constants (invariant 14): a container with no memory limit is an unbounded claim on a machine somebody else pays for."
+spec:
+  validationFailureAction: {{ .FailureAction }}
+  background: false
+  rules:
+    - name: every-container-has-a-memory-limit
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchLabels:
+                  epn.io/governed: "true"
+      validate:
+        message: "every container must set resources.limits.memory (invariant 14: limits are economic)"
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: epn-metered
+  labels:
+    epn.io/component: policy
+  annotations:
+    policies.kyverno.io/description: "Nothing local is free (invariant 13). Every pod carries the metered label so the sampler that prices vcpu-seconds and GiB-hours cannot miss it."
+spec:
+  background: false
+  rules:
+    - name: label-metered
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchLabels:
+                  epn.io/governed: "true"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              +(epn.io/metered): "true"

@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+  labels:
+    app: {{ .Name }}
+    epn.io/component: voice
+    epn.io/operator: epn.voice-llm.v1
+spec:
+  # Zero at rest, like the speech engines it belongs with. The dial path wakes
+  # the whole voice pack together and hibernates it together.
+  replicas: 0
+  selector:
+    matchLabels:
+      app: {{ .Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Name }}
+        epn.io/component: voice
+    spec:
+      # LIVE. See priority_classes.go.
+      priorityClassName: epn-live
+      containers:
+        - name: voice-llm
+          image: {{ .VoiceLLMImage }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 11434
+          env:
+            # Hold the one model resident for the whole call. The default unloads
+            # after five minutes idle, which on a PTT call means a reload in the
+            # middle of a conversation — the pod is already scaled to zero between
+            # calls, so idle eviction inside a call buys nothing and costs a stall.
+            - name: OLLAMA_KEEP_ALIVE
+              value: "-1"
+            # One model, one engine. This instance exists so the spoken turn never
+            # queues behind or evicts the general model.
+            - name: OLLAMA_MAX_LOADED_MODELS
+              value: "1"
+            # One slot at the talker's context: the shape the memory limit was
+            # sized for (see VoiceTalkerContext).
+            - name: OLLAMA_NUM_PARALLEL
+              value: "{{ .VoiceTalkerParallel }}"
+            - name: OLLAMA_CONTEXT_LENGTH
+              value: "{{ .VoiceTalkerContext }}"
+            - name: EPN_VOICE_MODEL
+              value: "{{ .Model }}"
+            # THE SAME STORE AS THE GENERAL ENGINE. The pack shares the one
+            # model PVC, but this pod mounted it at /root/.ollama while the
+            # general engine keeps its blobs at the PVC root (OLLAMA_MODELS=
+            # /models) -- two layouts on one disk, so a model the gram had
+            # already pulled was "not found" here and every call re-pulled it
+            # (or failed to, and the talker said "still warming up"). One
+            # path, one copy.
+            - name: OLLAMA_MODELS
+              value: /models
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: "{{ .SpeechRequestMillicores }}m"
+              # Reserved at its limit: the talker is the last thing the
+              # OOM killer takes (speech_manifests.go says why).
+              memory: "{{ .VoiceLLMMemoryMiB }}Mi"
+            # The spoken turn is another stage of the same sequential pipeline, so
+            # it draws on the same burst pool the speech engines take turns using
+            # — it is never hot at the same moment as either of them.
+            limits:
+              cpu: "{{ .CPUMillicores }}m"
+              memory: "{{ .VoiceTalkerBudgetMiB }}Mi"
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: {{ .OllamaModelCachePVCName }}
