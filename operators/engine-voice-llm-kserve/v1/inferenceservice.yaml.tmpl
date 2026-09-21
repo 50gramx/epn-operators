@@ -9,6 +9,13 @@ metadata:
     # SCALE TO ZERO AT REST, WAKE ON THE FIRST REQUEST. The daemon's
     # packIdle/wakeBudget dance becomes these lines (D69).
     autoscaling.knative.dev/min-scale: "0"
+    # BORN BY THE FIRST REQUEST, NOT TO PROVE ITSELF. Without this Knative
+    # schedules one pod at creation to mark the revision ready, and at rest
+    # the guest has no 3 GiB for it (the general engine holds that room
+    # until a call yields it): "0/1 nodes are available: Insufficient
+    # memory", founder's laptop 2026-09-21. The substrate enables
+    # allow-zero-initial-scale for this line.
+    autoscaling.knative.dev/initial-scale: "0"
     autoscaling.knative.dev/max-scale: "1"
     # Keep the pod for the learned re-dial window before it is scaled away.
     autoscaling.knative.dev/scale-to-zero-pod-retention-period: "{{ .RetainSeconds }}s"
