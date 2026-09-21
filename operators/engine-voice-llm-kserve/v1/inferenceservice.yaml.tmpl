@@ -52,10 +52,13 @@ spec:
         # PRELOADED BEFORE READY. The talker's weights are faulted in by the
         # startup gate, so "ready" means "resident" and the call's first
         # turn is warm (the plan's "warm, not merely ready").
+        # The engine image carries no curl (117 probe failures said so,
+        # 2026-09-21); its own CLI loads the model and pins it resident.
         startupProbe:
           exec:
-            command: ["sh", "-c", "curl -sf http://127.0.0.1:11434/api/generate -d '{\"model\":\"{{ .Model }}\",\"keep_alive\":-1}' >/dev/null"]
+            command: ["sh", "-c", "ollama run {{ .Model }} --keepalive -1s ok >/dev/null"]
           periodSeconds: 5
+          timeoutSeconds: 120
           failureThreshold: {{ .StartupFailures }}
         readinessProbe:
           httpGet:
