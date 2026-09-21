@@ -62,10 +62,16 @@ spec:
             path: /api/tags
             port: 11434
           periodSeconds: 5
+        # REQUEST THE FLOOR, LIMIT THE BUDGET. A request equal to the whole
+        # budget made the scheduler nominate the node for a pod it could not
+        # place and hold that room against every other pod (Kyverno and
+        # KServe's own controllers went Pending behind it, 2026-09-21). The
+        # talker needs the floor to be born; it grows into the budget during
+        # the call, when the general engine has yielded (D68).
         resources:
           requests:
             cpu: "{{ .CPURequestMillicores }}m"
-            memory: "{{ .MemoryMiB }}Mi"
+            memory: "{{ .MemoryRequestMiB }}Mi"
           limits:
             cpu: "{{ .CPULimitMillicores }}m"
             memory: "{{ .MemoryMiB }}Mi"
