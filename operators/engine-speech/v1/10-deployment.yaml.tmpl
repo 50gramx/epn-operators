@@ -7,14 +7,14 @@ metadata:
     app: {{ .Name }}
     epn.io/component: speech
 spec:
-  # RESIDENT. The zero-at-rest rule was written for the speaches engine, which
-  # held ~1.5 GiB resident doing nothing — a real cost to keep warm. The moonshine
-  # engine measured 27 MiB with a model loaded, so the calculus inverts: holding
-  # it warm is cheaper than the old engine's IDLE overhead, and it buys a
-  # cold-start-free call. The idle-gate may still hibernate it under memory
-  # pressure; residency-as-default is honoured here at the manifest, and the
-  # elastic controller (next increment) owns the dynamic policy.
-  replicas: 1
+  # ZERO AT REST (D80, founder 2026-09-22). A call PREPARES: WakeForCall
+  # brings each engine to one replica and waits until it answers, under the
+  # learned wake budget, so the dial rings until the pack is warm and never
+  # talks to a sleeping engine; the pack stays warm for the learned grace
+  # after the last call and hibernates. Residency by manifest was written
+  # for a 27 MiB engine; the catalog grows and the models with it, and a
+  # standing replica is metered every second it stands (invariant 13).
+  replicas: 0
   # RECREATE, NOT ROLLING UPDATE — on a single-node gram a surge is impossible.
   #
   # The default RollingUpdate carries maxSurge 25%, so k8s tries to stand the NEW
