@@ -38,11 +38,18 @@ the templated bundles the daemon renders (Go `text/template`, `missingkey=error`
 for its inference engines, the PriorityClass ladder and the Kyverno admission
 policies. The daemon embeds a copy under
 `epn-daemon/internal/operators/store/bundles/` so a gram needs no network to
-render them; a gram overrides any bundle by placing it under
-`EPN_HOME/operators/<id>/v<N>/`. This catalog is the published source: the
-embedded copy is synced from here (`operators/<id>/v1` ⇄
-`store/bundles/<id>/v1`, byte-identical) and the daemon's golden tests hold
-the rendered output.
+render them (the cold seed; `TestEmbeddedBundlesAreTheCatalogByteForByte`
+pins it to this tree). At runtime the catalog reaches a gram as SIGNED
+PACKAGES (D77, 2026-09-22): a foundation gram packs each bundle here into a
+content-addressed package, signs an index id → version → CID with its node
+key and its foundation membership credential, and beacons it on the DHT;
+every gram verifies both offline, fetches from any peer, and renders from
+its verified package cache — so a bundle moves without a daemon release and
+nothing unsigned on a disk is ever rendered. The three copies (this git
+tree, every binary, every gram's cache) mean a network that goes fully dark
+loses nothing. Born operators (Evo/foundation-authored) travel in the same
+shape: `operator.yaml` beside `spec.json`, with substrate and priority
+derived from the body rung (D79).
 
 | id | what |
 |----|------|
@@ -52,4 +59,8 @@ the rendered output.
 | `engine-voice-llm-kserve` | the same talker as a KServe InferenceService (scale-to-zero, preload) |
 | `engine-ollama` | catalog engine, `epn-interactive` |
 | `engine-generation` | generation jobs, `epn-background` |
+| `engine-vllm` | vLLM OpenAI server, GPU (nvidia RuntimeClass) or CPU, learned memory ceiling |
+| `engine-llamacpp` | llama.cpp server for one GGUF, learned memory ceiling |
+| `runner` | the pod a born script/built specialist runs in (zero until asked, `epn-background`) |
+| `region-scene-bake` | on-demand region scene bake job, program carried as `main.py` |
 | `policy-enforce` | Kyverno ClusterPolicies + ResourceQuota for governed namespaces |
