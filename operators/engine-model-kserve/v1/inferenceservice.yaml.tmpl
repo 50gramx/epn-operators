@@ -1,0 +1,89 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+  labels:
+    epn.io/component: model-serving
+  annotations:
+    epn.io/model: "{{ .Model }}"
+    # A PROVEN MODEL, SERVED AT ZERO (D81). Every model that passed its
+    # probe on this gram is reachable by name through the gateway; nothing
+    # is resident until a request names it, and the general engine keeps
+    # the room in between. The probe itself stays on the engine pod (it
+    # measures residency there); this serves what the probe proved.
+    autoscaling.knative.dev/min-scale: "0"
+    # BORN BY THE FIRST REQUEST, NOT TO PROVE ITSELF. Without this Knative
+    # schedules one pod at creation to mark the revision ready, and at rest
+    # the guest has no 3 GiB for it (the general engine holds that room
+    # until a call yields it): "0/1 nodes are available: Insufficient
+    # memory", founder's laptop 2026-09-21. The substrate enables
+    # allow-zero-initial-scale for this line.
+    autoscaling.knative.dev/initial-scale: "0"
+    autoscaling.knative.dev/max-scale: "1"
+    # Keep the pod for the learned re-dial window before it is scaled away.
+    autoscaling.knative.dev/scale-to-zero-pod-retention-period: "{{ .RetainSeconds }}s"
+    autoscaling.knative.dev/target: "1"
+    autoscaling.knative.dev/metric: "concurrency"
+spec:
+  predictor:
+    minReplicas: 0
+    maxReplicas: 1
+    timeout: 120
+    priorityClassName: {{ .PriorityClass }}
+    containers:
+      - name: kserve-container
+        image: {{ .Image }}
+        imagePullPolicy: IfNotPresent
+        ports:
+          - containerPort: 11434
+            protocol: TCP
+        env:
+          - name: OLLAMA_HOST
+            value: "0.0.0.0:11434"
+          - name: OLLAMA_KEEP_ALIVE
+            value: "-1"
+          - name: OLLAMA_MAX_LOADED_MODELS
+            value: "1"
+          - name: OLLAMA_NUM_PARALLEL
+            value: "{{ .Parallel }}"
+          - name: OLLAMA_CONTEXT_LENGTH
+            value: "{{ .Context }}"
+          - name: OLLAMA_MODELS
+            value: "/models"
+          - name: EPN_SERVED_MODEL
+            value: "{{ .Model }}"
+        # PRELOADED BEFORE READY. The model's weights are faulted in by the
+        # startup gate, so "ready" means "resident" and the first request is
+        # warm (the plan's "warm, not merely ready").
+        # The engine image carries no curl (117 probe failures said so,
+        # 2026-09-21); its own CLI loads the model and pins it resident.
+        startupProbe:
+          exec:
+            command: ["sh", "-c", "ollama run {{ .Model }} --keepalive -1s ok >/dev/null"]
+          periodSeconds: 5
+          timeoutSeconds: 120
+          failureThreshold: {{ .StartupFailures }}
+        readinessProbe:
+          httpGet:
+            path: /api/tags
+            port: 11434
+          periodSeconds: 5
+        # REQUEST WHAT THE MODEL MEASURED, LIMIT THE BUDGET: the request is
+        # the learned residency so the scheduler places it honestly, and a
+        # model this guest cannot hold beside the engine stays Pending and
+        # says so rather than evicting the engine.
+        resources:
+          requests:
+            cpu: "{{ .CPURequestMillicores }}m"
+            memory: "{{ .MemoryRequestMiB }}Mi"
+          limits:
+            cpu: "{{ .CPULimitMillicores }}m"
+            memory: "{{ .MemoryMiB }}Mi"
+        volumeMounts:
+          - name: model-cache
+            mountPath: /models
+    volumes:
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: {{ .PVCName }}

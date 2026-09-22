@@ -1,0 +1,7 @@
+id: engine-model-kserve
+version: "1"
+display_name: "Proven model as a KServe InferenceService"
+description: "One InferenceService per model that passed its probe on this gram (D81): scale-to-zero at rest, born by the first request that names it through the gateway, weights preloaded before ready, memory requested at the model's learned residency. The probe stays on the engine pod; this serves what it proved. epn-interactive priority: a person waiting on a screen."
+kind: engine
+priority_class: epn-interactive
+substrate: pod
