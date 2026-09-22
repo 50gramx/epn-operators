@@ -1,0 +1,7 @@
+id: runner
+version: "1"
+display_name: "Specialist runner"
+description: "The pod a born script/built specialist runs in: the pinned python image executing the program a ConfigMap mounts, asleep at zero replicas until a capability is called. Its shape is generated from the spec, never authored: no privilege, no host access, the diag-reader ServiceAccount only when the spec asked to read the cluster, a person's credential only as a perimeter Secret. Background priority: a run consults it, nobody waits on it."
+kind: runner
+priority_class: epn-background
+substrate: pod

@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: {{ .Namespace }}
+  labels:
+    app: vllm
+    epn.io/operator: epn.vllm.v1
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      # A person waiting on a screen; yields to a live call (priority bundle).
+      priorityClassName: epn-interactive
+{{ .RuntimeClass }}      containers:
+      - name: vllm
+        image: {{ .Image }}
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - -m
+        - vllm.entrypoints.openai.api_server
+        args:
+        - "--host=0.0.0.0"
+        - "--port=8000"
+        - "--max-model-len=4096"
+        - "--gpu-memory-utilization=0.9"
+        # Reuse the KV cache for a shared prompt prefix across turns, so a stable
+        # system prompt + summary is prefilled once and not re-processed every
+        # turn. Ollama and llama.cpp do this by default; vLLM needs it asked for.
+        - "--enable-prefix-caching"
+        - "--model={{ .Model }}"
+        - "--served-model-name={{ .Model }}"
+        # Weights land on the PVC (HF_HOME below), so a restart with the same
+        # model -- or the next artifact of the pass -- does not download again.
+        - "--download-dir=/models/hf"
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        # A memory limit is the law of a governed namespace (policy-enforce):
+        # the GPU path used to carry only nvidia.com/gpu and was refused.
+        resources:
+          requests:
+{{- if .GPURequest }}
+            nvidia.com/gpu: {{ .GPURequest }}
+{{- end }}
+            memory: "{{ .MemRequestMiB }}Mi"
+            cpu: "{{ .CPURequestMillis }}m"
+          limits:
+{{- if .GPURequest }}
+            nvidia.com/gpu: {{ .GPURequest }}
+{{- end }}
+            memory: "{{ .MemLimitMiB }}Mi"
+            cpu: "{{ .CPULimitMillis }}m"
+        # /health answers only once the model is loaded, and a first load is a
+        # multi-GB download plus minutes of graph capture. A startup probe holds
+        # liveness off until the server answers.
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 90
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        volumeMounts:
+        - name: models
+          mountPath: /models
+        env:
+        - name: VLLM_ALLOW_LONG_MAX_POSITION_EMBEDDINGS
+          value: "true"
+        # Every HuggingFace download -- vLLM's own at start, and the store's
+        # snapshot_download for the next artifact -- goes to the claim.
+        - name: HF_HOME
+          value: /models/hf
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: {{ .ModelPVC }}
+      nodeSelector:
+        kubernetes.io/os: linux

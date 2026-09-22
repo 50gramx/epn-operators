@@ -1,0 +1,7 @@
+id: engine-vllm
+version: "1"
+display_name: "vLLM inference engine"
+description: "vLLM OpenAI-compatible server for one HuggingFace model (FP8 / compressed-tensors / AWQ read from the repo's own config). GPU when the host offers one (nvidia RuntimeClass + device plugin), CPU otherwise. Weights land on the shared model PVC (HF_HOME) so a restart does not download again. Served on a node port so the daemon on the host can reach it."
+kind: engine
+priority_class: epn-interactive
+substrate: pod

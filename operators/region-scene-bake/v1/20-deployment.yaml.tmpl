@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+spec:
+  # ZERO UNTIL A REGION NEEDS BAKING. A region is baked at most once a
+  # fortnight, so a standing replica would be a pod idle 99.9% of the time
+  # holding a slot in a small tenant quota. The daemon scales it to 1 and
+  # releases it in the same call.
+  replicas: 0
+  selector:
+    matchLabels:
+      app: {{ .Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Name }}
+    spec:
+      # Nobody waits on a bake: it yields to a call and to a chat turn.
+      priorityClassName: epn-background
+{{ .RuntimeClass }}      containers:
+        - name: runner
+          image: {{ .Image }}
+          command: ["python", "/program/{{ .Entrypoint }}"]
+          ports:
+            - containerPort: {{ .Port }}
+          # Larger than an authored specialist's appetite, which front-ends an
+          # API and mostly waits: this one holds a region's footprints in
+          # memory and triangulates them. The LIMIT stops a pathological
+          # region from evicting the engine; the REQUEST is what the tenant
+          # quota insists on being told.
+          resources:
+            requests:
+              cpu: "{{ .CPURequest }}"
+              memory: "{{ .MemoryRequest }}"
+            limits:
+              cpu: "{{ .CPULimit }}"
+              memory: "{{ .MemoryLimit }}"
+          volumeMounts:
+            - name: program
+              mountPath: /program
+      volumes:
+        - name: program
+          configMap:
+            name: {{ .Name }}-src

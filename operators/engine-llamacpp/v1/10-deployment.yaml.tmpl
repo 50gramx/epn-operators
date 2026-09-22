@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llamacpp
+  namespace: {{ .Namespace }}
+  labels:
+    app: llamacpp
+    epn.io/operator: epn.llamacpp.v1
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: llamacpp
+  template:
+    metadata:
+      labels:
+        app: llamacpp
+    spec:
+      # A person waiting on a screen; yields to a live call (priority bundle).
+      priorityClassName: epn-interactive
+{{ .RuntimeClass }}      containers:
+      - name: llamacpp
+        image: {{ .Image }}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "-hf"
+        - "{{ .HFRepo }}"
+{{- if .HFFile }}
+        - "--hf-file"
+        - "{{ .HFFile }}"
+{{- end }}
+        - "--host"
+        - "0.0.0.0"
+        - "--port"
+        - "8000"
+        # Leave a core for the host and the daemon; llama.cpp will otherwise take
+        # every thread and starve the machine it is meant to serve.
+        - "-t"
+        - "{{ .Threads }}"
+        - "-np"
+        - "{{ .Parallel }}"
+        - "-c"
+        - "{{ .CtxSize }}"
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: LLAMA_CACHE
+          value: /models
+        # A memory limit is the law of a governed namespace (policy-enforce);
+        # this pod carried none and would have been refused at admission.
+        resources:
+          requests:
+            memory: "{{ .MemRequestMiB }}Mi"
+            cpu: "{{ .CPURequestMillis }}m"
+          limits:
+            memory: "{{ .MemLimitMiB }}Mi"
+            cpu: "{{ .CPULimitMillis }}m"
+        volumeMounts:
+        - name: models
+          mountPath: /models
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          # Weights are fetched on first start; a cold gram needs minutes.
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          failureThreshold: 60
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 300
+          periodSeconds: 30
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: {{ .ModelPVC }}

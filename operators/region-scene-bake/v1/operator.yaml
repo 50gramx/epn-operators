@@ -1,0 +1,7 @@
+id: region-scene-bake
+version: "1"
+display_name: "Region scene bake"
+description: "Bakes a region's scene (footprints triangulated into a mesh) on demand. A zero-replica Deployment of the python runner mounting main.py from a ConfigMap; the daemon scales it to 1 for one bake and back to 0 after. Background priority: nobody waits on a bake, and it yields to a call or a chat."
+kind: job
+priority_class: epn-background
+substrate: pod

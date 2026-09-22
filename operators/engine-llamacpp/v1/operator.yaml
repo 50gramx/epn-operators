@@ -1,0 +1,7 @@
+id: engine-llamacpp
+version: "1"
+display_name: "llama.cpp inference engine"
+description: "llama.cpp server for one GGUF model pulled from HuggingFace (-hf repo, optional --hf-file), N parallel slots each with its own context, threads = host cores minus one for the daemon. Weights cached on the shared model PVC (LLAMA_CACHE). Served on a node port so the daemon on the host can reach it."
+kind: engine
+priority_class: epn-interactive
+substrate: pod

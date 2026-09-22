@@ -1,0 +1,19 @@
+# NodePort, not ClusterIP: the daemon lives on the host, outside the cluster,
+# and must be able to call its own engine.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-svc
+  namespace: {{ .Namespace }}
+  labels:
+    app: vllm
+spec:
+  type: NodePort
+  selector:
+    app: vllm
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+    protocol: TCP
+    nodePort: {{ .NodePort }}

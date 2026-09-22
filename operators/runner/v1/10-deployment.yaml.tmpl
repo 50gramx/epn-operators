@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+spec:
+  # ASLEEP UNTIL ASKED. The daemon scales this to 1 on the first capability
+  # call and returns it to 0 when nothing has consulted the specialist for a
+  # while. A born domain nobody is currently asking about should not hold a
+  # slot in a small tenant quota.
+  replicas: 0
+  selector:
+    matchLabels:
+      app: {{ .Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Name }}
+    spec:
+{{ .ServiceAccount }}{{ .PriorityClass }}{{ .RuntimeClass }}      containers:
+        - name: runner
+          image: {{ .Image }}
+          command: ["python", "/program/{{ .Entrypoint }}"]
+          ports:
+            - containerPort: {{ .Port }}
+          resources:
+            requests:
+              cpu: "{{ .CPURequest }}"
+              memory: "{{ .MemoryRequest }}"
+            limits:
+              cpu: "{{ .CPULimit }}"
+              memory: "{{ .MemoryLimit }}"
+{{ .ReadinessProbe }}{{ .SecretEnv }}          volumeMounts:
+            - name: program
+              mountPath: /program
+      volumes:
+        - name: program
+          configMap:
+            name: {{ .SourceConfigMap }}

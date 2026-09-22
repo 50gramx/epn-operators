@@ -1,0 +1,12 @@
+# The program the runner mounts. Program arrives already indented by four
+# spaces per line with every CR stripped: a YAML literal block strips
+# trailing whitespace, and a Windows checkout would otherwise hand the pod
+# a file one byte per line shorter than the one this bundle carries.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Name }}-src
+  namespace: {{ .Namespace }}
+data:
+  {{ .Entrypoint }}: |
+{{ .Program }}

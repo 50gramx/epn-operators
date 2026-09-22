@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-config
+  namespace: {{ .Namespace }}
+data:
+  model: "{{ .Model }}"
+  download-dir: "/root/.cache/huggingface/hub"
+  model-dir: "/models"
+  gpu-memory-utilization: "0.9"
+  max-model-len: "4096"
