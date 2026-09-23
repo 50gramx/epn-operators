@@ -635,7 +635,17 @@ def bake(pincode):
         "pincode": pincode,
         "frame": {"kind": "enu", "units": "metres", "axes": "x=east,y=north,z=up"},
         "tile_metres": TILE_M,
-        "baked_at": int(time.time()),
+        # NO BAKE TIME IN THE CONTENT. The build doc states the invariant:
+        # "two grams baking the same region produce the same bytes" -- which is
+        # what makes a region ONE world rather than one per gram. A wall-clock
+        # second in the manifest broke it on every bake: four grams held four
+        # different CIDs for Hyderabad, none of them wrong, none of them the
+        # same, and replication could never converge because there was no
+        # shared object to converge on.
+        #
+        # WHEN a scene was baked is not part of WHAT it is. It already lives
+        # outside the bytes, on the artifact statement's revision, which is
+        # what orders two statements about one region. Nothing read this field.
         # Complete means there is geometry to look at. It does NOT claim a
         # capture: no splat has been placed here, and a region with one is
         # still baked by the pipeline outside until that path is carried in.
