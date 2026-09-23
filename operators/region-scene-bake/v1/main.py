@@ -82,6 +82,12 @@ MAX_TAR_BYTES = 64 * 1024 * 1024
 # of the bargain.
 USER_AGENT = "epn-daemon region-scene-bake (+https://50gramx.com)"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+# The reverse of the above: a point on the earth to the postcode that contains
+# it. This is what a person WALKING toward the edge of a region needs (RW-5):
+# they have coordinates, not a pincode, and a browser must never call a public
+# geocoder itself -- the courtesy gap, the USER_AGENT and the rate budget all
+# live here, on one machine, where they can be honoured.
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 OVERPASS_URLS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
@@ -333,6 +339,25 @@ def _get(url, data=None, accept_json=True):
         req.add_header("Accept", "application/json")
     with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def postcode_at(lat, lon):
+    """The postcode containing a point, or "" when none does.
+    
+    zoom=18 asks for building-level detail, which is what carries a postcode
+    in the address parts; a coarser zoom answers with a district and no
+    postcode at all. Returns "" rather than guessing: a neighbour named wrong
+    is a region baked for nobody.
+    """
+    q = urllib.parse.urlencode({
+        "lat": "%.6f" % lat, "lon": "%.6f" % lon,
+        "format": "json", "zoom": "18", "addressdetails": "1",
+    })
+    hit = _get(NOMINATIM_REVERSE_URL + "?" + q)
+    if not isinstance(hit, dict):
+        return ""
+    pin = str((hit.get("address") or {}).get("postcode", "")).strip()
+    return pin if PINCODE.match(pin) else ""
 
 
 def geocode(pincode):
@@ -831,6 +856,35 @@ class Handler(BaseHTTPRequestHandler):
                 "total": len(tar),
                 "b64": base64.b64encode(piece).decode(),
             })
+            return
+        if path == "/where":
+            # WHICH REGION IS THIS POINT IN (RW-5). Answers a pincode for a
+            # lat/lon so the gram can turn "somebody walked toward here" into
+            # a want. It does NOT bake: naming a region and producing one are
+            # different costs and only one of them should happen because a
+            # camera moved.
+            q = urllib.parse.parse_qs(parsed.query)
+            try:
+                lat = float((q.get("lat") or [""])[0])
+                lon = float((q.get("lon") or [""])[0])
+            except ValueError:
+                self._json(400, {"error": "lat and lon must be numbers"})
+                return
+            if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+                self._json(400, {"error": "that point is not on the earth"})
+                return
+            try:
+                pin = postcode_at(lat, lon)
+            except Exception as exc:
+                self._json(502, {"error": "could not name that place: %s" % exc})
+                return
+            if not pin:
+                # Honest emptiness. Plenty of the earth has no postcode, and
+                # answering one that is merely NEAR would send a walker into
+                # the wrong region.
+                self._json(404, {"error": "no postcode covers that point"})
+                return
+            self._json(200, {"pincode": pin})
             return
         self._json(404, {"error": "no such path"})
 
