@@ -4,3 +4,7 @@ display_name: "EP&N enforce mode (admission)"
 description: "Kyverno policies that put the network's law on every pod in a governed namespace, ours or a brand's: a priority class (defaulted to epn-background when absent, so nothing outranks a live call by omission), a memory limit (no unbounded pod: limits are economic, invariant 14), and the metered label (invariant 13: nothing local is free). Namespaces opt in with the label epn.io/governed=true; the daemon labels its own and every brand's."
 kind: substrate
 substrate: pod
+network:
+  # Nothing outside the cluster reaches this, so it costs no port
+  # at all: the API-server proxy is the whole path (D89).
+  reach: cluster

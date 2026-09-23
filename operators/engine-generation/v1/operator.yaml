@@ -5,3 +5,8 @@ description: "Image generation pod: OpenAI image API compatible, with support fo
 kind: engine
 priority_class: epn-background
 substrate: pod
+network:
+  # Reached by this gram's own daemon; the port is allocated by the
+  # gram (cluster.GramPorts), never written here (D89).
+  reach: gram
+  proto: http

@@ -5,3 +5,8 @@ description: "The spoken-turn engine served through KServe on Knative (D69): sca
 kind: engine
 priority_class: epn-live
 substrate: pod
+network:
+  # Reached by this gram's own daemon; the port is allocated by the
+  # gram (cluster.GramPorts), never written here (D89).
+  reach: gram
+  proto: http

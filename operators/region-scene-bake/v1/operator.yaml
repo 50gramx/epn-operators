@@ -5,3 +5,7 @@ description: "Bakes a region's scene (footprints triangulated into a mesh) on de
 kind: job
 priority_class: epn-background
 substrate: pod
+network:
+  # Nothing outside the cluster reaches this, so it costs no port
+  # at all: the API-server proxy is the whole path (D89).
+  reach: cluster

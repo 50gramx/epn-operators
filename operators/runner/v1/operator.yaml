@@ -5,3 +5,7 @@ description: "The pod a born script/built specialist runs in: the pinned python 
 kind: runner
 priority_class: epn-background
 substrate: pod
+network:
+  # Nothing outside the cluster reaches this, so it costs no port
+  # at all: the API-server proxy is the whole path (D89).
+  reach: cluster

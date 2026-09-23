@@ -5,3 +5,8 @@ description: "Speech-to-text and text-to-speech engines for voice dial. Renders 
 kind: engine
 priority_class: epn-live
 substrate: pod
+network:
+  # Reached by this gram's own daemon; the port is allocated by the
+  # gram (cluster.GramPorts), never written here (D89).
+  reach: gram
+  proto: http

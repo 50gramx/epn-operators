@@ -5,3 +5,8 @@ description: "Ollama inference pod: llama.cpp model management, Ollama tag and H
 kind: engine
 priority_class: epn-interactive
 substrate: pod
+network:
+  # Reached by this gram's own daemon; the port is allocated by the
+  # gram (cluster.GramPorts), never written here (D89).
+  reach: gram
+  proto: http

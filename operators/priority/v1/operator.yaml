@@ -4,3 +4,7 @@ display_name: "EP&N priority ladder"
 description: "PriorityClass ladder: epn-live (a person on a live call, preempts everything) > epn-interactive (a person waiting on a screen) > epn-background (nobody waiting, never preempts). Cluster-scoped, idempotent."
 kind: substrate
 substrate: pod
+network:
+  # Nothing outside the cluster reaches this, so it costs no port
+  # at all: the API-server proxy is the whole path (D89).
+  reach: cluster
