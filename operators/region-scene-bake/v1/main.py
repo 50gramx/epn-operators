@@ -468,6 +468,7 @@ def overpass(bbox):
     s = "%f,%f,%f,%f" % (bbox[1], bbox[0], bbox[3], bbox[2])   # S,W,N,E
     query = (
         "[out:json][timeout:%d];(" % (HTTP_TIMEOUT - 20) +
+        'node["place"](' + s + ');' +
         'way["building"](' + s + ');' +
         'way["highway"](' + s + ');' +
         'way["natural"~"^(water|wood|scrub|grassland|heath)$"](' + s + ');' +
@@ -495,8 +496,16 @@ def region_from_osm(osm, lat0, lon0, label, pincode):
     """Buildings with heights and provenance, and ranked roads."""
     buildings, roads, land, rivers = [], [], [], []
     prov = {}
+    labels = {}
     for e in osm.get("elements", []):
         t = e.get("tags") or {}
+        name = t.get("name")
+        if name and e.get("type") == "node" and t.get("place"):
+            labels[name] = {"n": name, "lon": round(e["lon"], 6), "lat": round(e["lat"], 6), "k": "place"}
+            continue
+        if name and t.get("highway") in ("motorway", "trunk", "primary", "secondary") and e.get("geometry"):
+            mid = e["geometry"][len(e["geometry"]) // 2]
+            labels.setdefault(name, {"n": name, "lon": round(mid["lon"], 6), "lat": round(mid["lat"], 6), "k": "road"})
         if "building" not in t and "highway" not in t:
             kind = land_kind(t)
             if kind is not None:
@@ -525,6 +534,7 @@ def region_from_osm(osm, lat0, lon0, label, pincode):
     if len(buildings) > MAX_BUILDINGS:
         buildings = buildings[:MAX_BUILDINGS]
     return {"buildings": buildings, "roads": roads, "land": land, "rivers": rivers,
+            "labels": [labels[k] for k in sorted(labels)][:300],
             "provenance": prov, "label": label, "pincode": pincode}
 
 
@@ -703,6 +713,7 @@ def bake(pincode):
         "metres_per_deg": [round(mE, 6), round(mN, 1)],
         "counts": counts,
         "height_provenance": prov,
+        "labels": region["labels"],
         "attribution": "Map data (c) OpenStreetMap contributors, ODbL",
         "mesh_stride": 5,
         "roads_stride": 4,
@@ -730,7 +741,7 @@ def bake(pincode):
         "tile_metres": TILE_M,
         # How deep the ratchet has turned here (D-RW2), so a sweep can tell a
         # shallow region from a fresh one.
-        "layers": ["L1", "L2"],
+        "layers": ["L1", "L2", "names"],
         # NO BAKE TIME IN THE CONTENT. The build doc states the invariant:
         # "two grams baking the same region produce the same bytes" -- which is
         # what makes a region ONE world rather than one per gram. A wall-clock
