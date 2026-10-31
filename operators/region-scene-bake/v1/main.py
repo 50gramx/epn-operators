@@ -134,6 +134,47 @@ ROAD_RANK = {
 
 ROAD_WIDTH = {5: 11.0, 4: 8.0, 3: 6.5, 2: 5.0, 1: 3.5, 0: 2.5}
 
+# L2 OF THE RATCHET (D-RW2): what the ground IS, as one more tile part, "l1".
+# A viewer that does not know the key simply never asks for it. The number is
+# the fourth float of each vertex, so a fifth kind is a shader line, not a format.
+LAND_WATER, LAND_WOOD, LAND_GRASS, LAND_FARM, LAND_URBAN = 0, 1, 2, 3, 4
+WATERWAY_WIDTH = {"river": 14.0, "canal": 8.0, "stream": 3.0, "drain": 2.0, "ditch": 1.5}
+MAX_LAND_POINTS = 400
+LAND_TOL_M = 6.0
+
+
+def land_kind(t):
+    """Which kind of ground a feature says it is, or None."""
+    if t.get("natural") == "water" or t.get("water") or t.get("landuse") in ("reservoir", "basin"):
+        return LAND_WATER
+    if t.get("natural") in ("wood", "scrub") or t.get("landuse") == "forest":
+        return LAND_WOOD
+    if t.get("leisure") in ("park", "garden", "pitch", "golf_course", "nature_reserve") or \
+            t.get("landuse") in ("grass", "meadow", "recreation_ground", "cemetery", "village_green") or \
+            t.get("natural") in ("grassland", "heath"):
+        return LAND_GRASS
+    if t.get("landuse") in ("farmland", "orchard", "vineyard", "farmyard", "plant_nursery"):
+        return LAND_FARM
+    if t.get("landuse") in ("residential", "commercial", "industrial", "retail", "railway", "brownfield"):
+        return LAND_URBAN
+    return None
+
+
+def outer_rings(e):
+    """The closed outer rings of a way or a multipolygon relation.
+
+    A relation's outer boundary usually arrives as several ways; only the ones
+    closed on their own are kept. Holes are not cut: an island in a lake is
+    drawn as lake, which reads better than a lake that vanished.
+    """
+    def closed(g):
+        return len(g) >= 4 and g[0]["lat"] == g[-1]["lat"] and g[0]["lon"] == g[-1]["lon"]
+    if e.get("type") == "relation":
+        return [m["geometry"] for m in e.get("members", [])
+                if m.get("role") == "outer" and m.get("geometry") and closed(m["geometry"])]
+    g = e.get("geometry")
+    return [g] if g and closed(g) else []
+
 
 def num(v):
     if v is None:
@@ -309,12 +350,12 @@ def cell_of(x, y):
 
 
 class Tile(object):
-    __slots__ = ("ix", "iy", "b0", "b1", "r0", "r1",
+    __slots__ = ("ix", "iy", "b0", "b1", "r0", "r1", "l1",
                  "zmin", "zmax", "xmin", "xmax", "ymin", "ymax")
 
     def __init__(self, ix, iy):
         self.ix, self.iy = ix, iy
-        self.b0, self.b1, self.r0, self.r1 = [], [], [], []
+        self.b0, self.b1, self.r0, self.r1, self.l1 = [], [], [], [], []
         self.zmin, self.zmax = 0.0, 0.0
         self.xmin = ix * TILE_M
         self.xmax = (ix + 1) * TILE_M
@@ -429,6 +470,12 @@ def overpass(bbox):
         "[out:json][timeout:%d];(" % (HTTP_TIMEOUT - 20) +
         'way["building"](' + s + ');' +
         'way["highway"](' + s + ');' +
+        'way["natural"~"^(water|wood|scrub|grassland|heath)$"](' + s + ');' +
+        'relation["natural"~"^(water|wood)$"](' + s + ');' +
+        'way["waterway"~"^(river|canal|stream|drain|ditch)$"](' + s + ');' +
+        'way["landuse"](' + s + ');' +
+        'relation["landuse"](' + s + ');' +
+        'way["leisure"~"^(park|garden|pitch|golf_course|nature_reserve)$"](' + s + ');' +
         ");out geom;"
     )
     body = urllib.parse.urlencode({"data": query}).encode()
@@ -446,10 +493,19 @@ def overpass(bbox):
 
 def region_from_osm(osm, lat0, lon0, label, pincode):
     """Buildings with heights and provenance, and ranked roads."""
-    buildings, roads = [], []
+    buildings, roads, land, rivers = [], [], [], []
     prov = {}
     for e in osm.get("elements", []):
         t = e.get("tags") or {}
+        if "building" not in t and "highway" not in t:
+            kind = land_kind(t)
+            if kind is not None:
+                for g in outer_rings(e):
+                    land.append({"g": [[round(p["lon"], 6), round(p["lat"], 6)] for p in g], "k": kind})
+            elif t.get("waterway") in WATERWAY_WIDTH and e.get("geometry"):
+                rivers.append({"g": [[round(p["lon"], 6), round(p["lat"], 6)] for p in e["geometry"]],
+                               "w": WATERWAY_WIDTH[t["waterway"]]})
+            continue
         g = e.get("geometry")
         if not g or len(g) < 2:
             continue
@@ -468,7 +524,7 @@ def region_from_osm(osm, lat0, lon0, label, pincode):
     buildings.sort(key=lambda b: -b["h"])
     if len(buildings) > MAX_BUILDINGS:
         buildings = buildings[:MAX_BUILDINGS]
-    return {"buildings": buildings, "roads": roads,
+    return {"buildings": buildings, "roads": roads, "land": land, "rivers": rivers,
             "provenance": prov, "label": label, "pincode": pincode}
 
 
@@ -564,14 +620,49 @@ def bake(pincode):
                     t.r0.extend((px, py, 0.05, rank))
                 nroad_coarse += 2
 
+    # The ground: biggest first, so a park inside a suburb is drawn over it.
+    nland = 0
+    def area_of(f):
+        return -abs(signed_area([enu(x, y) for x, y in f["g"][:-1]]))
+    for f in sorted(region["land"], key=lambda f: (area_of(f), f["k"])):
+        ring = [enu(x, y) for x, y in f["g"]]
+        ring = simplify_ring(ring[:-1], LAND_TOL_M)
+        if len(ring) < 3 or len(ring) > MAX_LAND_POINTS:
+            continue
+        cx = sum(p[0] for p in ring) / len(ring)
+        cy = sum(p[1] for p in ring) / len(ring)
+        t = tile(*cell_of(cx, cy))
+        for (i0, i1, i2) in earclip(ring):
+            for i in (i0, i1, i2):
+                t.l1.extend((ring[i][0], ring[i][1], 0.03 + 0.01 * (LAND_URBAN - f["k"]), float(f["k"])))
+                t.grow(ring[i][0], ring[i][1], 0.1)
+            nland += 1
+    for w in region["rivers"]:
+        pts = [enu(x, y) for x, y in w["g"]]
+        half = w["w"] * 0.5
+        for i in range(len(pts) - 1):
+            (x1, y1), (x2, y2) = pts[i], pts[i+1]
+            dx, dy = x2-x1, y2-y1
+            L = math.hypot(dx, dy)
+            if L < 1e-6:
+                continue
+            nx, ny = -dy/L*half, dx/L*half
+            t = tile(*cell_of((x1+x2)*0.5, (y1+y2)*0.5))
+            for (px, py) in ((x1+nx, y1+ny), (x2+nx, y2+ny), (x2-nx, y2-ny),
+                             (x1+nx, y1+ny), (x2-nx, y2-ny), (x1-nx, y1-ny)):
+                t.l1.extend((px, py, 0.08, float(LAND_WATER)))
+                t.grow(px, py, 0.1)
+            nland += 2
+
     files = {}
     index = []
-    totals = {"b0": 0, "b1": 0, "r0": 0, "r1": 0}
+    totals = {"b0": 0, "b1": 0, "r0": 0, "r1": 0, "l1": 0}
     for (ix, iy), t in sorted(tiles.items()):
         tid = "%d_%d" % (ix, iy)
         parts = {}
         for key, floats, stride in (("b0", t.b0, 5), ("b1", t.b1, 5),
-                                    ("r0", t.r0, 4), ("r1", t.r1, 4)):
+                                    ("r0", t.r0, 4), ("r1", t.r1, 4),
+                                    ("l1", t.l1, 4)):
             if not floats:
                 continue
             # array('f') is byte-identical to numpy float32 here, which is the
@@ -600,6 +691,7 @@ def bake(pincode):
         "triangles": ntri_full,
         "coarse_triangles": ntri_coarse,
         "road_triangles": nroad_full,
+        "land_triangles": nland,
         "tiles": len(index),
     }
 
@@ -624,6 +716,7 @@ def bake(pincode):
         "grid_origin": [0.0, 0.0],   # cells are anchored on the ENU origin
         "mesh_stride": 5,            # x,y,z,kind,measured
         "roads_stride": 4,           # x,y,z,rank
+        "land_stride": 4,            # x,y,z,kind
         "splat_layout": "pos f32x3|scale f32x3|rot f32x4|rgb u8x3|op u8",
         "lods": [0, 1],
         "counts": counts,
@@ -635,6 +728,9 @@ def bake(pincode):
         "pincode": pincode,
         "frame": {"kind": "enu", "units": "metres", "axes": "x=east,y=north,z=up"},
         "tile_metres": TILE_M,
+        # How deep the ratchet has turned here (D-RW2), so a sweep can tell a
+        # shallow region from a fresh one.
+        "layers": ["L1", "L2"],
         # NO BAKE TIME IN THE CONTENT. The build doc states the invariant:
         # "two grams baking the same region produce the same bytes" -- which is
         # what makes a region ONE world rather than one per gram. A wall-clock
