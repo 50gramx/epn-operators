@@ -401,16 +401,19 @@ def postcode_at(lat, lon):
     return pin if PINCODE.match(pin) else ""
 
 
-def geocode(pincode):
+def geocode(pincode, place=""):
     """Pincode to centre and bounds, from Nominatim.
 
     Asked as a postalcode rather than as free text, so "560100" cannot match a
     house number or a road with that name somewhere else in the world.
     """
-    q = urllib.parse.urlencode({
-        "postalcode": pincode, "country": "India",
-        "format": "json", "limit": "1", "addressdetails": "1",
-    })
+    # Six digits is an Indian pincode. Anywhere else a postcode alone is
+    # ambiguous (2001 is Sydney and many other places), so the place named by
+    # the index goes with it.
+    where = {"postalcode": pincode, "country": "India"}
+    if not re.fullmatch(r"[1-9][0-9]{5}", pincode):
+        where = {"q": "%s, %s" % (pincode, place)} if place else {"postalcode": pincode}
+    q = urllib.parse.urlencode(dict(where, format="json", limit="1", addressdetails="1"))
     hits = _get(NOMINATIM_URL + "?" + q)
     if not hits:
         raise RuntimeError("no place found for pincode %s" % pincode)
@@ -538,7 +541,7 @@ def region_from_osm(osm, lat0, lon0, label, pincode):
             "provenance": prov, "label": label, "pincode": pincode}
 
 
-def bake(pincode):
+def bake(pincode, place=""):
     """Produce the scene's files as {name: bytes}.
 
     The frame is the contract the viewer and every later capture agree on: one
@@ -546,7 +549,7 @@ def bake(pincode):
     anchored on that origin rather than on the bbox -- so re-baking with more
     data does not renumber the tiles under a viewer already holding some.
     """
-    lat0, lon0, bb, label = geocode(pincode)
+    lat0, lon0, bb, label = geocode(pincode, place)
     osm = None
     for half in HALF_M_LADDER:
         bbox, mE, mN = bounds_for(lat0, lon0, bb, half)
@@ -1012,6 +1015,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             req = json.loads(self._read_body() or b"{}")
             pincode = str(req.get("pincode", "")).strip()
+            place = str(req.get("place", "")).strip()[:120]
         except Exception as exc:
             self._json(400, {"error": "unreadable request: %s" % exc})
             return
@@ -1021,7 +1025,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
-            tar = to_tar(bake(pincode))
+            tar = to_tar(bake(pincode, place))
         except Exception as exc:
             self._json(500, {"error": "bake failed: %s" % exc})
             return
