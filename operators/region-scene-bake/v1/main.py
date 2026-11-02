@@ -109,6 +109,8 @@ HTTP_TIMEOUT = 180
 # 5 km simply gets a tighter, complete scene rather than no scene at all.
 HALF_M_LADDER = (2500.0, 1500.0, 900.0, 500.0)
 MAX_BUILDINGS = 40000
+MAX_OBJECTS = 20000
+OBJECT_KIND = {}
 
 TILE_M = 500.0
 FLOOR_M = 3.2
@@ -480,6 +482,10 @@ def overpass(bbox):
         'way["landuse"](' + s + ');' +
         'relation["landuse"](' + s + ');' +
         'way["leisure"~"^(park|garden|pitch|golf_course|nature_reserve)$"](' + s + ');' +
+        # L2: things that stand in the street, one point each
+        'node["natural"="tree"](' + s + ');' +
+        'node["highway"~"^(street_lamp|traffic_signals|bus_stop)$"](' + s + ');' +
+        'node["power"="tower"](' + s + ');' +
         ");out geom;"
     )
     body = urllib.parse.urlencode({"data": query}).encode()
@@ -500,9 +506,28 @@ def region_from_osm(osm, lat0, lon0, label, pincode):
     buildings, roads, land, rivers = [], [], [], []
     prov = {}
     labels = {}
+    # L2 OBJECTS: what stands in the street, each with its kind and where it is.
+    # "est" marks one placed by rule (a lamp every 35 m along a road tagged
+    # lit=yes) rather than mapped, so the viewer and later observations can tell
+    # a guess from a fact.
+    objects, lit_roads = [], []
     for e in osm.get("elements", []):
         t = e.get("tags") or {}
         name = t.get("name")
+        if e.get("type") == "node" and "lon" in e:
+            kind = OBJECT_KIND.get((t.get("natural"), t.get("highway"), t.get("power")))
+            if kind is None:
+                kind = ("tree" if t.get("natural") == "tree" else
+                        {"street_lamp": "lamp", "traffic_signals": "signal", "bus_stop": "stop"}.get(t.get("highway")) or
+                        ("tower" if t.get("power") == "tower" else None))
+            if kind:
+                o = {"k": kind, "lon": round(e["lon"], 6), "lat": round(e["lat"], 6)}
+                if num(t.get("height")):
+                    o["h"] = num(t.get("height"))
+                objects.append(o)
+                continue
+        if t.get("lit") == "yes" and "highway" in t and e.get("geometry"):
+            lit_roads.append(e["geometry"])
         if name and e.get("type") == "node" and t.get("place"):
             labels[name] = {"n": name, "lon": round(e["lon"], 6), "lat": round(e["lat"], 6), "k": "place"}
             continue
@@ -532,12 +557,29 @@ def region_from_osm(osm, lat0, lon0, label, pincode):
             buildings.append({"g": thin(ring, 2e-6), "h": h, "s": src})
         elif "highway" in t:
             roads.append({"g": ring, "r": ROAD_RANK.get(t.get("highway"), 0)})
+    # Lamps along lit roads where no lamp is mapped near.
+    mapped = {(round(o["lon"], 3), round(o["lat"], 3)) for o in objects if o["k"] == "lamp"}
+    for g in lit_roads:
+        carry = 0.0
+        for a, b in zip(g, g[1:]):
+            dx = (b["lon"] - a["lon"]) * 111320 * math.cos(math.radians(lat0))
+            dy = (b["lat"] - a["lat"]) * 110540
+            seg = math.hypot(dx, dy)
+            d = 35.0 - carry
+            while d <= seg:
+                f = d / seg if seg else 0
+                lon, lat = a["lon"] + (b["lon"] - a["lon"]) * f, a["lat"] + (b["lat"] - a["lat"]) * f
+                if (round(lon, 3), round(lat, 3)) not in mapped:
+                    objects.append({"k": "lamp", "lon": round(lon, 6), "lat": round(lat, 6), "est": 1})
+                d += 35.0
+            carry = (carry + seg) % 35.0
+    objects = objects[:MAX_OBJECTS]
     # Biggest first, so a cap keeps the buildings that carry the skyline.
     buildings.sort(key=lambda b: -b["h"])
     if len(buildings) > MAX_BUILDINGS:
         buildings = buildings[:MAX_BUILDINGS]
     return {"buildings": buildings, "roads": roads, "land": land, "rivers": rivers,
-            "labels": [labels[k] for k in sorted(labels)][:300],
+            "labels": [labels[k] for k in sorted(labels)][:300], "objects": objects,
             "provenance": prov, "label": label, "pincode": pincode}
 
 
@@ -717,6 +759,7 @@ def bake(pincode, place=""):
         "counts": counts,
         "height_provenance": prov,
         "labels": region["labels"],
+        "objects": region["objects"],
         "attribution": "Map data (c) OpenStreetMap contributors, ODbL",
         "mesh_stride": 5,
         "roads_stride": 4,
