@@ -79,11 +79,11 @@ spec:
                 rm -rf /cache/deps/torch /cache/deps/torch-* /cache/deps/torchaudio /cache/deps/torchaudio-* /cache/deps/.speech.ok /cache/deps/.speech.v2.ok
                 {{ .SpeechInstall }}                   && touch {{ .SpeechMarker }} || true
               fi
-              # WeSpeaker speaker-id encoders (config.yaml + avg_model.pt/.onnx),
-              # on their own marker for the same reason speechbrain has one: a
-              # pod whose other deps are already cached still needs this one.
-              if [ ! -f {{ .WespeakerMarker }} ]; then
-                {{ .WespeakerInstall }} && touch {{ .WespeakerMarker }} || true
+              # pyannote.audio speaker encoders (pyannote's WeSpeaker ResNet), on
+              # their own marker for the same reason speechbrain has one: a pod
+              # whose other deps are already cached still needs this one.
+              if [ ! -f {{ .SpeakerMarker }} ]; then
+                {{ .SpeakerInstall }} && touch {{ .SpeakerMarker }} || true
               fi
               # Moshi (Kyutai full-duplex speech): moshi.models.loaders is the
               # Mimi codec + LM loader the speech-duplex runtime needs. --no-deps,
